@@ -194,12 +194,3 @@ On startup, the server prints which port it is listening to and whether the cach
 5. Cache is protected by fine-grained locking for maximum concurrency.
 
 ***
-
-**End of README**
-
-[1](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/b8f73097-6447-4c87-b494-7778ae316af2/README.md)
-[2](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/e09df5ad-df6b-4a82-8d02-b702663815b4/cache.c)
-[3](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/03a91f72-e53e-4153-a9f5-1eb3621510b8/cache.h)
-[4](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/dc473c42-cbbc-4847-9205-f0aa0734f691/proxy_parse.c)
-[5](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/55676143-bcaf-4e8a-9195-192c75e6b081/proxy_parse.h)
-[6](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/6c196302-95da-469a-8357-c09b67b6f8bb/proxy_server.c)
