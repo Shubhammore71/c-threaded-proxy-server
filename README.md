@@ -1,139 +1,209 @@
-High-Performance Caching HTTP Proxy in C
-A robust, multi-threaded, and high-performance caching HTTP proxy server written in C from the ground up. This project is engineered to serve as a scalable and efficient intermediary for web traffic, significantly reducing latency and bandwidth usage through an intelligent in-memory caching layer.
+Below is a comprehensive and detailed **README.md** file for your Multi-Threaded Caching HTTP Proxy Server in C, based on the complete source and implementation details from your project files.
 
-Project Overview
-A proxy server acts as a gateway between a user's machine and the internet. Instead of connecting directly to a web server, a client connects to this proxy, which then forwards the request, retrieves the response, and sends it back. This project enhances this basic model by adding two critical features:
+***
 
-Multi-Threading: To handle many users at once without getting blocked.
+# Multi-Threaded Caching HTTP Proxy Server in C
 
-Caching: To remember and instantly serve frequently requested content without re-fetching it from the internet.
+A high-performance, multi-threaded HTTP proxy server written in C. This project serves as a scalable middleman for web traffic, with an efficient LRU (Least Recently Used) cache to accelerate content delivery and reduce network latency. The design focuses on modularity, thread safety, and extensibility.
 
-Live Demo (Conceptual)
-Imagine the server running in your terminal. A GIF would show the following flow:
+***
 
-First Request: A user requests http://example.com. The terminal shows a Cache MISS, the proxy fetches the page from the internet, adds it to the cache, and serves it.
+## Table of Contents
 
-Second Request: The user refreshes the page. The terminal instantly shows a Cache HIT, and the page is served directly from memory, demonstrating a significant speedup.
+- Overview
+- Features
+- Architecture & Component Design
+- UML/Class Diagram (Textual)
+- Core Data Structures & Algorithms
+  - LRU Cache
+  - Concurrency (Thread/Lock Model)
+- Module Descriptions
+- Compilation & Running
+- Testing the Proxy
+- Project Structure
+- Limitations & Extensibility
 
-System Architecture and Design Philosophy
-The server is built on a foundation of modularity, performance, and robustness. The core design separates concerns into distinct, independent modules, making the system easier to understand, maintain, and extend.
+***
 
-Request Lifecycle
-A single client request flows through the system as follows:
+## Overview
 
-Listen & Accept: The main server thread listens on a specified port. Upon receiving a new connection, it calls accept() and immediately dispatches the new client socket to a dedicated worker thread.
+This proxy server listens for HTTP requests from multiple clients, parses requests, forwards them to target servers, and caches responses for improved future access. Each connection is handled in a separate thread, and the LRU cache ensures only the most relevant objects remain in memory.
 
-Dispatch: A new POSIX thread (pthread) is created specifically for this client. This isolates each client's request, preventing a slow request from blocking others.
+***
 
-Parse Request: The worker thread reads the raw HTTP request from the client socket and uses the proxy_parse module to decode it into a structured C object (ParsedRequest).
+## Features
 
-Check Cache: The request URL is used as a key to check the cache module.
+- **Multi-Threaded Architecture**: Each client connection is handled by a dedicated thread, offering true concurrency.
+- **Efficient LRU Cache**: Employs a thread-safe, hash-table-backed doubly-linked list for O(1) cache operations and quick eviction.
+- **Modular Design**: Segregates logic into server control, parsing, and caching modules for better maintainability.
+- **Robust Concurrency**: Utilizes POSIX read-write locks (`pthread_rwlock_t`) for granular cache access, maximizing read concurrency.
+- **Easy Build/Run**: Conditional compilation allows building with or without cache by toggling a flag in the Makefile.
 
-Cache Hit: If the content exists in the cache and is valid, it is retrieved directly from memory and sent back to the client. The request is complete.
+***
 
-Cache Miss: If the content is not in the cache, the proxy proceeds to the next step.
+## Architecture & Component Design
 
-Forward to Origin: The worker thread opens a new socket connection to the destination web server (the "origin"), forwards the client's HTTP request, and waits for a response.
+- **proxy_server.c**: The main entry point. Listens for connections and spawns a new pthread per client. Handles the accept loop and thread lifecycle.
+- **proxy_parse.c/.h**: Implements parsing and reassembling for HTTP request lines/headers. Extracts method, path, protocol, and headers safely.
+- **cache.c/.h**: Manages an in-memory LRU cache. Handles all object storage, lookup, eviction, and concurrency controls.
 
-Stream, Cache & Respond: As the response is received from the origin server, it is simultaneously streamed back to the client and, if it meets the criteria (e.g., size), stored in the cache for future requests.
+### UML/Class Diagram (Textual)
 
-Clean Up: The thread closes both the client and origin server sockets and terminates, freeing its resources.
+```
++------------------+        +-------------------+        +------------------+
+|  proxy_server    | <----> |   proxy_parse     | <----> |      cache       |
++------------------+        +-------------------+        +------------------+
+| accept(),        |        | parse/unparse/    |        | get/put,         |
+| thread mgmt,     |        | manage headers    |        | eviction,        |
+| socket I/O       |        +-------------------+        | hash+LRU logic   |
++------------------+                                         +------------------+
+```
 
-UML Component Diagram
-This diagram illustrates the primary components and their interactions:
+***
 
-Technical Deep Dive
-This section details the critical engineering decisions that underpin the server's performance and stability.
+## Core Data Structures & Algorithms
 
-The Cache Engine: A High-Performance LRU Implementation
-A cache's value is determined by its speed. A slow cache can be worse than no cache at all. Our implementation is designed for maximum performance under concurrent load.
+### LRU Cache – Hash Table + Doubly-Linked List
 
-The Problem: The Cache Trilemma
-A cache needs to perform three operations extremely quickly:
+- **Hash Table (`hash_table[]`)**:  
+  - Each bucket points to a collision-handling list of `HashEntry`s.
+  - Key: Full request URL.  
+  - Value: Pointer to a `CacheNode`.
 
-Find (Lookup): Check if an item exists.
+- **CacheNode Structure**:
+  ```c
+  typedef struct CacheNode {
+      char *url;
+      char *data;
+      int size;
+      struct CacheNode *prev, *next;
+  } CacheNode;
+  ```
 
-Update (On Hit): Mark an item as "just used".
+- **Doubly-Linked List**:
+  - Maintains recency of usage.
+  - Head: Most recently used.
+  - Tail: Least recently used (evicted first).
 
-Evict (On Miss & Full): Find and remove the "least valuable" item.
+- **Eviction & Replacement**:
+  - When inserting a new object that would exceed cache capacity, evict LRU nodes until sufficient space exists.
+  - On cache hit, move node to head (MRU).
 
-The Solution: A Hash Table + Doubly-Linked List
-This composite data structure is the canonical solution for an efficient LRU cache, providing O(1) average time complexity for all three operations.
+- **Concurrency**:
+  - Reads use `pthread_rwlock_rdlock` (shared).
+  - Writes and evictions use `pthread_rwlock_wrlock` (exclusive).
+  - Granular locks allow many parallel reads with no blocking.
 
-Hash Table (cache_map): The hash table is the key to fast lookups.
+### Thread-Per-Connection Model
 
-Role: It maps a request URL (the key) to a direct memory pointer of a CacheNode in the linked list.
+- Main server uses `accept()` in a loop.
+- Each new client spawns a pthread, which:
+  1. Reads/parses client HTTP request.
+  2. Looks up response in cache (if enabled).
+  3. If cached, returns stored object. If not cached or disabled, connects to origin server, forwards request, reads response, returns result, and adds to cache (if enabled).
 
-Performance: Hashing allows for near-instantaneous lookups, insertions, and deletions in O(1) on average.
+***
 
-Doubly-Linked List: The list is the key to tracking recency.
+## Module Descriptions
 
-Role: It maintains the strict order of item usage. The head of the list is always the Most Recently Used (MRU) item, and the tail is the Least Recently Used (LRU) item.
+| Module           | Description                                                        |
+|------------------|--------------------------------------------------------------------|
+| proxy_server.c   | Server logic, client threads, sockets, and integration.            |
+| proxy_parse.c/.h | HTTP request parsing, header management.                           |
+| cache.c/.h       | Thread-safe LRU cache (hash table + doubly-linked list).           |
+| Makefile         | Compilation rules; “with” and “without” cache.                     |
+| README.md        | Project documentation (this file).                                 |
 
-Performance: Being doubly-linked (with prev and next pointers) is critical. When a cache hit occurs, we can pluck the node from its current position and move it to the head in O(1) time. When eviction is needed, we can remove the tail node in O(1) time.
+***
 
-Concurrency Model: Read-Write Locks (pthread_rwlock_t)
-Choosing the correct synchronization primitive is critical for performance.
+## Compilation & Running
 
-Why Not a Mutex? A simple mutex is a "pessimistic" lock. It assumes any access could be a write and grants exclusive access to only one thread at a time. In a read-heavy workload like a cache, this would create a massive bottleneck, forcing readers to wait in line unnecessarily.
+### Requirements
 
-Why a Read-Write Lock is Ideal: It's an "optimistic" lock. It understands the difference between read and write operations.
+- GCC/Clang (C99 or later)
+- Linux/macOS
+- POSIX Threads library
 
-Shared Read Lock: It allows any number of threads to acquire a read lock simultaneously. This is perfect for our scenario, as multiple clients can get cache hits without blocking each other.
+### Compiling
 
-Exclusive Write Lock: When a thread needs to modify the cache (add a new item or evict an old one), it requests a write lock. The system waits for all readers to finish, grants exclusive access to the writer, and blocks all other threads until the write is complete. This maximizes concurrency while guaranteeing data integrity.
-
-The Server Core: Sockets and Threading
-Networking: The Sockets API
-The server is built on the standard Berkeley Sockets API. The main thread follows the canonical server setup:
-
-socket(): Creates the network endpoint.
-
-setsockopt(SO_REUSEADDR): A crucial step that allows the server to restart immediately after being shut down, avoiding "Address already in use" errors.
-
-bind(): Assigns the specified port to the socket.
-
-listen(): Puts the socket in a passive mode, ready to accept incoming connections.
-
-accept(): Blocks until a client connects, then returns a new socket for that specific connection.
-
-Concurrency Model: Thread-per-Connection
-How it Works: For every incoming connection, a new POSIX thread is spawned to handle it.
-
-Advantages:
-
-Simplicity: The logic is straightforward, and each thread manages its own state.
-
-Isolation: A crash or error in one client's thread will not affect others.
-
-Limitations & Trade-offs: This model is excellent for learning and for moderate loads, but it does not scale to thousands of simultaneous connections due to the overhead of creating and context-switching threads. A more advanced architecture would use a thread pool or an event-driven model (e.g., using epoll or kqueue) to handle massive scale.
-
-Getting Started
-Prerequisites
-A C compiler (like gcc or clang)
-
-make build automation tool
-
-A POSIX-compliant OS (Linux, macOS)
-
-Compilation
-A Makefile simplifies the entire compilation process.
-
-# To compile both the standard and caching-enabled executables
+```bash
+# Build both variants (with and without cache)
 make all
 
-# To build only the version WITH the cache
+# Only non-caching proxy
+make proxy_server
+
+# Only caching proxy
 make proxy_server_with_cache
+```
 
-# To remove all compiled binaries and object files
-make clean
+### Running
 
-Running the Server
-Run the desired executable, providing a port number as a command-line argument.
-
-# Run the high-performance caching server on port 8080
+```bash
+# Start caching proxy on port 8080
 ./proxy_server_with_cache 8080
 
-# The server will confirm it's running:
-# > Cache enabled.
-# > Proxy server listening on port 8080...
+# Or, non-caching proxy on port 9999
+./proxy_server 9999
+```
+
+On startup, the server prints which port it is listening to and whether the cache is enabled.
+
+***
+
+## Testing the Proxy
+
+1. **Configure System/Browser Proxy**:
+   - Set HTTP proxy to `127.0.0.1` and the selected port (e.g., 8080).
+
+2. **Access HTTP Sites** (HTTPS not supported in this build):
+   - Example: http://example.com/, http://neverssl.com/
+   - "Cache HIT" will display on repeat accesses if cache is enabled.
+
+3. **Turn Off Proxy** when done to restore default browsing.
+
+***
+
+## Project Structure
+
+```
+.
+├── Makefile
+├── README.md
+├── cache.c
+├── cache.h
+├── proxy_parse.c
+├── proxy_parse.h
+└── proxy_server.c
+```
+
+***
+
+## Limitations & Extensibility
+
+- **Only supports HTTP**; HTTPS and CONNECT not implemented.
+- **Thread-per-connection** is simple and robust but may not scale to very high concurrent client loads.
+- **Easy to extend:**  
+  - Add logging, statistics, further protocols (HTTPS), or persistent cache.
+  - Swap to an event-driven model (select/epoll) for heavy concurrency use-cases.
+
+***
+
+## Reference: How It Works
+
+1. Main server listens for connections.
+2. Each connection is handed to a new thread.
+3. Requests are parsed, and the cache is checked (if enabled).
+4. Data is fetched/relayed/cached as appropriate; all resources are cleaned up after response.
+5. Cache is protected by fine-grained locking for maximum concurrency.
+
+***
+
+**End of README**
+
+[1](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/b8f73097-6447-4c87-b494-7778ae316af2/README.md)
+[2](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/e09df5ad-df6b-4a82-8d02-b702663815b4/cache.c)
+[3](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/03a91f72-e53e-4153-a9f5-1eb3621510b8/cache.h)
+[4](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/dc473c42-cbbc-4847-9205-f0aa0734f691/proxy_parse.c)
+[5](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/55676143-bcaf-4e8a-9195-192c75e6b081/proxy_parse.h)
+[6](https://ppl-ai-file-upload.s3.amazonaws.com/web/direct-files/attachments/50519927/6c196302-95da-469a-8357-c09b67b6f8bb/proxy_server.c)
