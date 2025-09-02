@@ -1,7 +1,3 @@
-Below is a comprehensive and detailed **README.md** file for your Multi-Threaded Caching HTTP Proxy Server in C, based on the complete source and implementation details from your project files.
-
-***
-
 # Multi-Threaded Caching HTTP Proxy Server in C
 
 A high-performance, multi-threaded HTTP proxy server written in C. This project serves as a scalable middleman for web traffic, with an efficient LRU (Least Recently Used) cache to accelerate content delivery and reduce network latency. The design focuses on modularity, thread safety, and extensibility.
