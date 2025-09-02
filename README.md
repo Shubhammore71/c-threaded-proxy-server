@@ -46,7 +46,7 @@ The codebase is modular and robust, with clear separation of concerns:
 
 ***
 
-## UML Class Diagram (Detailed)
+## UML Class Diagram
 
 **Textual Diagram:**
 
