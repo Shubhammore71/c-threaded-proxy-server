@@ -1,166 +1,125 @@
-# Multi-Threaded Caching HTTP Proxy Server in C
+# High-Performance Caching HTTP Proxy in C
 
-A high-performance, multi-threaded HTTP proxy server written in C. This project serves as a scalable middleman for web traffic, with an efficient LRU (Least Recently Used) cache to accelerate content delivery and reduce network latency. The design focuses on modularity, thread safety, and extensibility.
+A robust, multi-threaded, and high-performance caching HTTP proxy server written in C from the ground up. This project is engineered to serve as a scalable and efficient intermediary for web traffic, significantly reducing latency and bandwidth usage through an intelligent in-memory caching layer.[1]
 
 ***
 
 ## Table of Contents
 
 - Overview
-- Features
-- Architecture & Component Design
-- UML/Class Diagram (Textual)
-- Core Data Structures & Algorithms
-  - LRU Cache
-  - Concurrency (Thread/Lock Model)
-- Module Descriptions
-- Compilation & Running
-- Testing the Proxy
-- Project Structure
-- Limitations & Extensibility
+- Core Features
+- System Architecture & Design Philosophy
+- UML Component Diagram (Textual)
+- Technical Deep Dive
+- Getting Started
+- Project File Structure
+- Limitations & Future Improvements
 
 ***
 
 ## Overview
 
-This proxy server listens for HTTP requests from multiple clients, parses requests, forwards them to target servers, and caches responses for improved future access. Each connection is handled in a separate thread, and the LRU cache ensures only the most relevant objects remain in memory.
+This proxy acts as a gateway between clients and the wider internet. Instead of connecting directly to a website, client software connects to the proxy server, which forwards the request and relays the response. The project elevates this classic middleware pattern through:
+
+- **Multi-Threading:** Handling many users at once without blocking, each in a separate thread.
+- **Caching:** Remembering frequently requested content and serving it instantly when requested again, without re-fetching it from the origin server.[2][1]
+
+The request lifecycle:  
+1. The main thread accepts new connections.  
+2. Each is dispatched to a worker thread, which parses the HTTP request, checks the cache, and either serves from memory (cache hit) or fetches fresh data (cache miss).
 
 ***
 
-## Features
+## Core Features
 
-- **Multi-Threaded Architecture**: Each client connection is handled by a dedicated thread, offering true concurrency.
-- **Efficient LRU Cache**: Employs a thread-safe, hash-table-backed doubly-linked list for O(1) cache operations and quick eviction.
-- **Modular Design**: Segregates logic into server control, parsing, and caching modules for better maintainability.
-- **Robust Concurrency**: Utilizes POSIX read-write locks (`pthread_rwlock_t`) for granular cache access, maximizing read concurrency.
-- **Easy Build/Run**: Conditional compilation allows building with or without cache by toggling a flag in the Makefile.
+- **Multi-Threaded Architecture:** Thread-per-connection model using POSIX `pthread`s—simple, robust, and highly effective for moderate to high concurrency.
+- **High-Performance LRU Cache:** Implements a thread-safe, highly efficient Least Recently Used cache using a hash table plus a doubly-linked list for constant-time cache lookups and evictions.[2]
+- **Concurrency Optimized:** Utilizes `pthread_rwlock_t` read-write locks, enabling unlimited readers and exclusive access during writes, critical for high-throughput cache operations under heavy load.
+- **Clean Modular Design:** Core server, HTTP request parser, and the caching engine are separate and easily testable units, ensuring the codebase is extensible and maintainable.
+- **Conditional Compilation:** The same codebase can be compiled with or without caching by toggling a Makefile flag, making it easy to test with/without the performance benefits of in-memory caching.
 
 ***
 
-## Architecture & Component Design
+## System Architecture & Design Philosophy
 
-- **proxy_server.c**: The main entry point. Listens for connections and spawns a new pthread per client. Handles the accept loop and thread lifecycle.
-- **proxy_parse.c/.h**: Implements parsing and reassembling for HTTP request lines/headers. Extracts method, path, protocol, and headers safely.
-- **cache.c/.h**: Manages an in-memory LRU cache. Handles all object storage, lookup, eviction, and concurrency controls.
+This proxy server is built on modularity, performance, and robustness principles:
 
-### UML/Class Diagram (Textual)
+- **Encapsulation & Separation of Concerns:**  
+  - *proxy_server*: Handles all socket and thread management, request/response routing.  
+  - *proxy_parse*: Accurately decodes and reassembles HTTP protocol messages.  
+  - *cache*: Manages fast and safe storage of frequently accessed objects.[4][5][3]
+
+- **Design Choices Explained:**  
+  - *Thread-per-Connection Model:*  
+    - Simple to implement and reason about. Each client gets its own isolated thread, which increases stability and makes debugging straightforward.
+    - Not suitable for extremely large numbers of simultaneous connections (see Limitations).
+  - *Cache Engine:*  
+    - A composite data structure (hash table + doubly-linked list) provides optimal performance: O(1) for lookups, inserts, removal, and LRU ordering.
+  - *Synchronization Model:*  
+    - A single mutex would force even read operations (which are the majority in a cache) to wait in line, drastically reducing throughput.
+    - Read-write locks (`pthread_rwlock_t`) allow thousands of parallel reads, only locking out others during insertions or evictions, vastly improving scalability for real-world loads.
+
+***
+
+## UML Component Diagram (Textual)
 
 ```
-+------------------+        +-------------------+        +------------------+
-|  proxy_server    | <----> |   proxy_parse     | <----> |      cache       |
-+------------------+        +-------------------+        +------------------+
-| accept(),        |        | parse/unparse/    |        | get/put,         |
-| thread mgmt,     |        | manage headers    |        | eviction,        |
-| socket I/O       |        +-------------------+        | hash+LRU logic   |
-+------------------+                                         +------------------+
++-----------------+         +------------------+       +-----------------+
+| proxy_server    |-------> | proxy_parse      |------>|   cache         |
++-----------------+         +------------------+       +-----------------+
+(Threads/Network)         (HTTP parser,         (hash table + LRU
+                           header utilities)     cache engine)
 ```
 
 ***
 
-## Core Data Structures & Algorithms
+## Technical Deep Dive
 
-### LRU Cache – Hash Table + Doubly-Linked List
+- **Cache Engine—Performance-Oriented LRU:**
+  - *Hash Table*: Quickly maps a full request URL to a node in a doubly-linked list.
+  - *Doubly-Linked List*: Tracks recency, with the head as MRU and tail as LRU for O(1) reordering and eviction.
+  - *Concurrency*: Read-write locks guarantee unlimited concurrent `get` operations; only writes (insert or evict) require exclusive access.
 
-- **Hash Table (`hash_table[]`)**:  
-  - Each bucket points to a collision-handling list of `HashEntry`s.
-  - Key: Full request URL.  
-  - Value: Pointer to a `CacheNode`.
-
-- **CacheNode Structure**:
-  ```c
-  typedef struct CacheNode {
-      char *url;
-      char *data;
-      int size;
-      struct CacheNode *prev, *next;
-  } CacheNode;
-  ```
-
-- **Doubly-Linked List**:
-  - Maintains recency of usage.
-  - Head: Most recently used.
-  - Tail: Least recently used (evicted first).
-
-- **Eviction & Replacement**:
-  - When inserting a new object that would exceed cache capacity, evict LRU nodes until sufficient space exists.
-  - On cache hit, move node to head (MRU).
-
-- **Concurrency**:
-  - Reads use `pthread_rwlock_rdlock` (shared).
-  - Writes and evictions use `pthread_rwlock_wrlock` (exclusive).
-  - Granular locks allow many parallel reads with no blocking.
-
-### Thread-Per-Connection Model
-
-- Main server uses `accept()` in a loop.
-- Each new client spawns a pthread, which:
-  1. Reads/parses client HTTP request.
-  2. Looks up response in cache (if enabled).
-  3. If cached, returns stored object. If not cached or disabled, connects to origin server, forwards request, reads response, returns result, and adds to cache (if enabled).
+- **Server Core—Sockets and Threading:**
+  - Uses the Berkeley Sockets API:
+    - `socket`, `setsockopt(SO_REUSEADDR)`, `bind`, `listen`, and `accept` are used to set up robust, non-blocking socket handling.
+  - Each accepted client is handled in its own pthread (thread-per-connection model):
+    - *Pros*: Simplicity, reliability, strong isolation.
+    - *Cons*: Some resource inefficiency at extremely high scale compared to thread pools or event-driven models.
 
 ***
 
-## Module Descriptions
+## Getting Started
 
-| Module           | Description                                                        |
-|------------------|--------------------------------------------------------------------|
-| proxy_server.c   | Server logic, client threads, sockets, and integration.            |
-| proxy_parse.c/.h | HTTP request parsing, header management.                           |
-| cache.c/.h       | Thread-safe LRU cache (hash table + doubly-linked list).           |
-| Makefile         | Compilation rules; “with” and “without” cache.                     |
-| README.md        | Project documentation (this file).                                 |
+### Prerequisites
 
-***
+- C compiler (gcc or clang)
+- `make` tool
+- A POSIX-compliant OS (Linux/macOS)
 
-## Compilation & Running
-
-### Requirements
-
-- GCC/Clang (C99 or later)
-- Linux/macOS
-- POSIX Threads library
-
-### Compiling
+### Compilation
 
 ```bash
-# Build both variants (with and without cache)
+# Compile both the standard and caching-enabled executables
 make all
 
-# Only non-caching proxy
-make proxy_server
-
-# Only caching proxy
+# Build only the caching-enabled version
 make proxy_server_with_cache
+
+# Remove compiled binaries and object files
+make clean
 ```
 
-### Running
+### Running the Server
 
 ```bash
-# Start caching proxy on port 8080
+# Run the caching server on port 8080
 ./proxy_server_with_cache 8080
-
-# Or, non-caching proxy on port 9999
-./proxy_server 9999
 ```
 
-On startup, the server prints which port it is listening to and whether the cache is enabled.
-
 ***
 
-## Testing the Proxy
-
-1. **Configure System/Browser Proxy**:
-   - Set HTTP proxy to `127.0.0.1` and the selected port (e.g., 8080).
-
-2. **Access HTTP Sites** (HTTPS not supported in this build):
-   - Example: http://example.com/, http://neverssl.com/
-   - "Cache HIT" will display on repeat accesses if cache is enabled.
-
-3. **Turn Off Proxy** when done to restore default browsing.
-
-***
-
-## Project Structure
+## Project File Structure
 
 ```
 .
@@ -175,22 +134,11 @@ On startup, the server prints which port it is listening to and whether the cach
 
 ***
 
-## Limitations & Extensibility
+## Limitations & Future Improvements
 
-- **Only supports HTTP**; HTTPS and CONNECT not implemented.
-- **Thread-per-connection** is simple and robust but may not scale to very high concurrent client loads.
-- **Easy to extend:**  
-  - Add logging, statistics, further protocols (HTTPS), or persistent cache.
-  - Swap to an event-driven model (select/epoll) for heavy concurrency use-cases.
-
-***
-
-## Reference: How It Works
-
-1. Main server listens for connections.
-2. Each connection is handed to a new thread.
-3. Requests are parsed, and the cache is checked (if enabled).
-4. Data is fetched/relayed/cached as appropriate; all resources are cleaned up after response.
-5. Cache is protected by fine-grained locking for maximum concurrency.
+- **Scalability:** The thread-per-connection model, while simple, does not scale to thousands of concurrent clients. For very high concurrency, an event-driven model (e.g., using `epoll`) or thread pool could be considered.
+- **Protocol Coverage:** Only HTTP is supported; HTTPS (`CONNECT`) and HTTP/2 are not supported but could be added with further development.
+- **Persistent Cache:** Current design is in-memory only; adding disk persistence or intelligent cache expiration could increase utility.
+- **Monitoring & Logging:** More robust runtime diagnostics, usage statistics, and error logging could improve operation and troubleshooting.
 
 ***
