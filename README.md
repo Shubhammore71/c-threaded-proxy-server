@@ -189,5 +189,3 @@ make proxy_server_with_cache
 - **Extensible logging, monitoring**, and runtime configuration would aid in production deployments.
 
 ***
-
-**End of README**
