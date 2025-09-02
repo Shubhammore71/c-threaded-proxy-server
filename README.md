@@ -45,6 +45,112 @@ The codebase is modular and robust, with clear separation of concerns:
 - **cache:** A thread-safe in-memory LRU cache with hash-table lookup and doubly-linked list eviction order.
 
 ***
+Here is the requested section, formatted and integrated as an addition to your original README file. It fits naturally after the "System Architecture & Design Philosophy" or before the "Technical Deep Dive" section to highlight the high-level design and data flow clearly for interviews or presentations:
+
+***
+
+## High-Level Architecture Diagram & Request Flow
+
+
+### High-Level Architecture Diagram
+
+```
++-----------------+      (1) TCP      +-------------------------------------------------------+      (8) DNS      +------------------+
+|                 |    Connection     |                                                       |     Lookup      |                  |
+|  Client Browser |<----------------->|                    PROXY SERVER                     |<--------------->|   DNS Server     |
+| (e.g., Chrome)  |                   |                                                       |                 |                  |
++-----------------+                   | +-----------------+       +-----------------------+ |                 +------------------+
+                                      | |                 |       |                       | |
+                                      | |   Main Thread   |------>|     Worker Thread     | |      (9) TCP      +------------------+
+                                      | | (Listen/Accept) |(3)    |   (Handle Request)    |<----------------->|                  |
+                                      | |                 |Spawns |                       | |    Connection     |  Origin Server   |
+                                      | +-----------------+       +-----------+-----------+ |                 | (e.g., example.com)|
+                                      |                             (4) |       ^ (7a)      |                 |                  |
+                                      |                                 v       |           |                 +------------------+
+                                      | +-----------------------+   +-----------+-----------+
+                                      | |                       |   |                       |
+                                      | |      HTTP Parser      |<--|       Cache Check     |
+                                      | |    (proxy_parse.c)    |   |      (Decision)       |
+                                      | |                       |   |                       |
+                                      | +-----------------------+   +-----------+-----------+
+                                      |                             (5) |       ^ (6b)      |
+                                      |                                 v       |           |
+                                      | +---------------------------------------+-----------+
+                                      | |                                                   |
+                                      | |                  Cache Module (cache.c)           |
+                                      | |                                                   |
+                                      | | +-----------------+   +-------------------------+ |
+                                      | | |   Hash Table    |-->| Doubly-Linked List (LRU)| |
+                                      | | | (Fast Lookups)  |   |     (Recency Order)     | |
+                                      | | +-----------------+   +-------------------------+ |
+                                      | |       [Protected by pthread_rwlock_t]             |
+                                      | +---------------------------------------------------+
+                                      |                                                       |
+                                      +-------------------------------------------------------+
+```
+
+### Detailed Walkthrough of the Request Flow
+
+1. **The Initial Connection**
+
+   What happens: A user's web browser, configured to use our proxy, initiates a TCP connection to the proxy server's IP address and port (e.g., 127.0.0.1:8080). The OS handles the three-way handshake (SYN, SYN-ACK, ACK) to establish a stable connection.
+
+2. **The Main Thread: The Listener**
+
+   What happens: The main function in `proxy_server.c` runs an infinite `while(1)` loop. Its only job is to call the blocking function `accept()`. It waits patiently at this line until a new client connection, like the one from step 1, arrives.
+
+   Design Choice: The main thread does no heavy lifting. It doesn't parse, it doesn't cache, it doesn't connect to the internet. It is purely a delegator. This is a key design principle for a responsive server—the main thread must always be free to accept new connections immediately.
+
+3. **Spawning a Worker Thread**
+
+   What happens: As soon as `accept()` returns a new socket for the client, the main thread immediately calls `pthread_create()`. This creates a brand new, independent thread of execution. The new thread is given the `handle_connection` function as its starting point and the client's socket descriptor as its argument.
+
+   Architectural Model: This is the "thread-per-connection" model. It provides excellent isolation—if one worker thread crashes, it won't affect any other client. The trade-off is the overhead of creating a new thread for every single request.
+
+4. **Parsing the HTTP Request**
+
+   What happens: The newly spawned Worker Thread now takes over. It reads the raw, plain-text HTTP request from the client's socket (e.g., `GET http://example.com/ ...`). It then passes this raw string to the HTTP Parser module (`proxy_parse.c`).
+
+   Component Interaction: The parser's job is to act as a translator, turning the unstructured text into a clean `ParsedRequest` C struct. This encapsulates the parsing logic, keeping the main server code clean.
+
+5. **The Cache Check (The Critical Decision)**
+
+   What happens: The worker thread takes the parsed URL (e.g., `http://example.com/`) and uses it as a key to query the Cache Module. This is the most important decision point in the entire flow.
+
+   Path A (Cache Hit) or Path B (Cache Miss)? The result of this check determines whether we take the "fast path" or the "slow path."
+
+6. **The Fast Path: Cache Hit**
+
+   What happens: The Cache Module's hash table provides an O(1) lookup and finds the content. The worker thread then:
+
+   - (a) Retrieves the cached web object (the HTTP response) directly from memory.
+   - (b) Updates the cache's LRU state by moving the corresponding node in the doubly-linked list to the very front (making it the Most Recently Used).
+   - (c) Sends the cached response directly to the Client Browser. The request is complete.
+
+   Performance: This entire process avoids any new network connections and is extremely fast. This is the primary purpose of the proxy.
+
+7. **The Slow Path: Cache Miss**
+
+   What happens: The Cache Module reports that the requested object is not in memory. The worker thread must now act as a regular web client.
+
+8. **DNS Lookup**
+
+   What happens: The worker thread extracts the hostname (e.g., `example.com`) from the parsed request and calls a function like `gethostbyname()` to ask the OS to resolve this name into an IP address. This may involve a network call to a DNS Server.
+
+9. **Forwarding the Request to the Origin Server**
+
+   What happens: Using the IP address from the DNS lookup, the worker thread opens a new TCP connection to the Origin Server. It then forwards the original HTTP request it received from the client.
+
+   Key Role: At this moment, the proxy is simultaneously a server (to the client browser) and a client (to the origin server).
+
+10. **Receiving and Caching the Response**
+
+    What happens: The worker thread receives the HTTP response from the Origin Server. As the data streams in, it does two things in parallel:
+
+    - (a) Forward: It immediately forwards the data back to the waiting Client Browser.
+    - (b) Store: It simultaneously stores a copy of the response in the Cache Module by calling `cache_put()`. If the cache is full, this action will trigger the eviction of the Least Recently Used item at the tail of the linked list.
+
+***
 
 ## UML Class Diagram
 
