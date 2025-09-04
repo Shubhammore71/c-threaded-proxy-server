@@ -54,40 +54,8 @@ Here is the requested section, formatted and integrated as an addition to your o
 
 ### High-Level Architecture Diagram
 
-```
-+-----------------+      (1) TCP      +-------------------------------------------------------+      (8) DNS      +------------------+
-|                 |    Connection     |                                                       |     Lookup      |                  |
-|  Client Browser |<----------------->|                    PROXY SERVER                     |<--------------->|   DNS Server     |
-| (e.g., Chrome)  |                   |                                                       |                 |                  |
-+-----------------+                   | +-----------------+       +-----------------------+ |                 +------------------+
-                                      | |                 |       |                       | |
-                                      | |   Main Thread   |------>|     Worker Thread     | |      (9) TCP      +------------------+
-                                      | | (Listen/Accept) |(3)    |   (Handle Request)    |<----------------->|                  |
-                                      | |                 |Spawns |                       | |    Connection     |  Origin Server   |
-                                      | +-----------------+       +-----------+-----------+ |                 | (e.g., example.com)|
-                                      |                             (4) |       ^ (7a)      |                 |                  |
-                                      |                                 v       |           |                 +------------------+
-                                      | +-----------------------+   +-----------+-----------+
-                                      | |                       |   |                       |
-                                      | |      HTTP Parser      |<--|       Cache Check     |
-                                      | |    (proxy_parse.c)    |   |      (Decision)       |
-                                      | |                       |   |                       |
-                                      | +-----------------------+   +-----------+-----------+
-                                      |                             (5) |       ^ (6b)      |
-                                      |                                 v       |           |
-                                      | +---------------------------------------+-----------+
-                                      | |                                                   |
-                                      | |                  Cache Module (cache.c)           |
-                                      | |                                                   |
-                                      | | +-----------------+   +-------------------------+ |
-                                      | | |   Hash Table    |-->| Doubly-Linked List (LRU)| |
-                                      | | | (Fast Lookups)  |   |     (Recency Order)     | |
-                                      | | +-----------------+   +-------------------------+ |
-                                      | |       [Protected by pthread_rwlock_t]             |
-                                      | +---------------------------------------------------+
-                                      |                                                       |
-                                      +-------------------------------------------------------+
-```
+![High-Level Architecture](High-Level-architecture.png)
+
 
 ### Detailed Walkthrough of the Request Flow
 
