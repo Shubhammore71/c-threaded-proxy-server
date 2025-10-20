@@ -1,6 +1,6 @@
 /**
  * @file proxy_parse.c
- * @author Your Name
+ * @author Shubham More
  * @brief Implementation of a simple HTTP request parser.
  *
  * This file provides the logic for parsing HTTP requests as defined in
