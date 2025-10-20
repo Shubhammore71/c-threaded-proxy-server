@@ -1,6 +1,6 @@
 /**
  * @file cache.h
- * @author Your Name
+ * @author Shubham More
  * @brief Interface for a thread-safe, in-memory LRU cache.
  *
  * This module provides a cache to store HTTP responses. It uses a hash table
