@@ -1,6 +1,6 @@
 /**
  * @file proxy_parse.h
- * @author Your Name
+ * @author Shubham More
  * @brief Interface for a simple HTTP request parser.
  *
  * This file defines the structures and functions for parsing raw HTTP requests.
