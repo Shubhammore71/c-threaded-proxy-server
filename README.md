@@ -44,8 +44,6 @@ The codebase is modular and robust, with clear separation of concerns:
 - **proxy_parse:** Responsible for parsing and rebuilding HTTP request lines and headers.
 - **cache:** A thread-safe in-memory LRU cache with hash-table lookup and doubly-linked list eviction order.
 
-***
-Here is the requested section, formatted and integrated as an addition to your original README file. It fits naturally after the "System Architecture & Design Philosophy" or before the "Technical Deep Dive" section to highlight the high-level design and data flow clearly for interviews or presentations:
 
 ***
 
