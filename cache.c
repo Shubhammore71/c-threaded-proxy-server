@@ -1,6 +1,6 @@
 /**
  * @file cache.c
- * @author Your Name
+ * @author Shubham More
  * @brief Implementation of a thread-safe, in-memory LRU cache.
  *
  * This file contains the logic for the LRU cache. It uses a hash table
