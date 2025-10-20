@@ -1,6 +1,6 @@
 /**
  * @file proxy_server.c
- * @author Your Name
+ * @author Shubham More
  * @brief A multi-threaded caching HTTP proxy server.
  *
  * This proxy server listens for incoming client connections, parses HTTP
