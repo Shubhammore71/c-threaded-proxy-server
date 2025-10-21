@@ -7,7 +7,6 @@
  * It is designed to extract key information from a request line and manage
  * HTTP headers. The implementation is in proxy_parse.c.
  *
- * Based on the original proxy_parse.h by Matvey Arye.
  */
 
 #ifndef PROXY_PARSE_H
